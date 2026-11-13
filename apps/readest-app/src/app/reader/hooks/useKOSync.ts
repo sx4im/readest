@@ -24,6 +24,7 @@ import {
   decideRemoteConflict,
   getRemoteFraction,
   getRemotePage,
+  getRemoteTotalPages,
   isCfiOnPage,
   isCfiProgress,
   isXPointerProgress,
@@ -328,8 +329,11 @@ export const useKOSync = (bookKey: string, provider: KosyncProgressProvider = ko
         const hasRemotePage = !isNaN(parseInt(remote.progress ?? '', 10));
         // A page derived from a percentage alone is a page of the local copy,
         // and only approximate.
+        // KOReader-protocol servers report a 0-based percentage
+        // ((page - 1) / total) while Readest pushes page / total (#7503);
+        // the helper takes the reading that agrees with the local copy.
         const remoteTotalPages = hasRemotePage
-          ? Math.round(remotePage / remotePercentage)
+          ? getRemoteTotalPages(remotePage, remotePercentage, localTotalPages)
           : localTotalPages;
         const pagesMatch = hasRemotePage && Math.abs(localTotalPages - remoteTotalPages) <= 1;
 

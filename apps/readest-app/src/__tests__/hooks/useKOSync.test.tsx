@@ -1088,6 +1088,46 @@ describe('useKOSync — fixed-layout page numbers (#7330)', () => {
   });
 });
 
+describe('useKOSync — Kavita PDF page count (#7503)', () => {
+  // Kavita reports a 0-based percentage, (page - 1) / totalPages, for PDFs:
+  // page 2 of 11 arrives as progress "2" with percentage 0.09090909. Deriving
+  // the total as page / percentage read 22 pages instead of 11.
+  beforeEach(() => {
+    h.book.format = 'PDF';
+    h.localProgress = {
+      location: '4',
+      pageinfo: { current: 4, total: 11 },
+      section: { current: 4, total: 11 },
+    };
+    h.remote = {
+      ...h.remote,
+      progress: '2',
+      percentage: 0.09090909,
+      device: 'Kavita',
+      device_id: 'Kavita',
+    };
+    h.getProgressMock.mockResolvedValue(h.remote);
+  });
+
+  test('prompt: shows page 2 of 11, not 2 of 22', async () => {
+    const { result } = renderHook(() => useKOSync('h1-view1'));
+    await settle();
+
+    expect(result.current.syncState).toBe('conflict');
+    expect(result.current.conflictDetails?.remote.preview).toBe('Page 2 of 11 (9.09%)');
+  });
+
+  test('prompt: taking it goes to page 2', async () => {
+    const { result } = renderHook(() => useKOSync('h1-view1'));
+    await settle();
+
+    await act(async () => {
+      await result.current.resolveWithRemote();
+    });
+    expect(h.view.select).toHaveBeenCalledWith(1);
+  });
+});
+
 describe('useKOSync — a provider with its own client and CFI positions (#7337)', () => {
   // Grimmory stores the EPUB CFI its own foliate-based reader writes, so a
   // Grimmory position is pushed and applied as a CFI, never as an XPointer.

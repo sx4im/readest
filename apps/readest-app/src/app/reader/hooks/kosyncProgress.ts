@@ -72,6 +72,31 @@ export const getRemotePage = (remote: KoSyncProgress, totalPages: number): numbe
 };
 
 /**
+ * Total page count a remote fixed-layout report implies.
+ *
+ * KOReader-protocol servers (KOReader itself, Kavita) report a 0-based
+ * percentage — (page - 1) / totalPages — while Readest pushes page / totalPages
+ * (#7503). Both readings are plausible from one report, so when the local
+ * copy's page count is known, take the reading that agrees with it; without a
+ * local count, follow the KOReader protocol. A zero percentage (first page)
+ * carries no total, so the local count is the only answer there.
+ */
+export const getRemoteTotalPages = (
+  remotePage: number,
+  remotePercentage: number,
+  localTotalPages: number,
+): number => {
+  if (!(remotePercentage > 0)) return localTotalPages;
+  if (remotePage <= 1) return Math.round(remotePage / remotePercentage);
+  const zeroBased = Math.round((remotePage - 1) / remotePercentage);
+  if (localTotalPages <= 0) return zeroBased;
+  const oneBased = Math.round(remotePage / remotePercentage);
+  return Math.abs(localTotalPages - zeroBased) <= Math.abs(localTotalPages - oneBased)
+    ? zeroBased
+    : oneBased;
+};
+
+/**
  * Outcome of resolving a remote KOReader position against the LOCAL book.
  *
  * The distinction between `unresolved` and `not-xpointer` is critical for

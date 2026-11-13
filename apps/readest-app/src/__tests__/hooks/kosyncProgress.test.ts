@@ -1,6 +1,10 @@
 // @vitest-environment node
 import { describe, it, expect } from 'vitest';
-import { isXPointerProgress, getRemoteFraction } from '@/app/reader/hooks/kosyncProgress';
+import {
+  isXPointerProgress,
+  getRemoteFraction,
+  getRemoteTotalPages,
+} from '@/app/reader/hooks/kosyncProgress';
 
 describe('isXPointerProgress', () => {
   it('accepts CREngine XPointers', () => {
@@ -54,5 +58,33 @@ describe('getRemoteFraction', () => {
     const remote = { progress: 'page-42', percentage: 0.5 };
     expect(isXPointerProgress(remote.progress)).toBe(false);
     expect(getRemoteFraction(remote)).toBe(0.5);
+  });
+});
+
+describe('getRemoteTotalPages', () => {
+  it('derives the total from a Kavita report (0-based percentage, #7503)', () => {
+    // Kavita: progress "2", percentage (2 - 1) / 11.
+    expect(getRemoteTotalPages(2, 0.09090909, 11)).toBe(11);
+    expect(getRemoteTotalPages(5, 0.36363637, 11)).toBe(11);
+    expect(getRemoteTotalPages(10, 0.8181818, 11)).toBe(11);
+  });
+
+  it('keeps Readest’s own page / total reports intact', () => {
+    // Readest pushes page 27 of 70 with percentage 27 / 70.
+    expect(getRemoteTotalPages(27, 27 / 70, 70)).toBe(70);
+    expect(getRemoteTotalPages(1, 1 / 70, 70)).toBe(70);
+  });
+
+  it('derives the total from a KOReader report (0-based percentage)', () => {
+    // KOReader on page 27 of 70 reports (27 - 1) / 70.
+    expect(getRemoteTotalPages(27, 26 / 70, 70)).toBe(70);
+  });
+
+  it('falls back to the KOReader protocol without a local page count', () => {
+    expect(getRemoteTotalPages(2, 0.09090909, 0)).toBe(11);
+  });
+
+  it('returns the local count on the first page, where the percentage is zero', () => {
+    expect(getRemoteTotalPages(1, 0, 11)).toBe(11);
   });
 });
