@@ -35,6 +35,13 @@ const stub = vi.hoisted(() => {
     return (
       <div data-testid={`note-editor-${surface}`}>
         <span data-testid={`note-editor-${surface}-value`}>{noteEditor.value}</span>
+        {/*
+          Mirrors the real editor's autoFocus: TextEditor focuses its
+          textarea once, in a mount effect — it does not re-focus on later
+          renders. A ref callback would re-fire on every render and mask
+          the steal this test guards against (#7511).
+        */}
+        <textarea data-testid={`note-editor-${surface}-input`} autoFocus />
         <button onClick={() => noteEditor.onSave('a thought worth keeping')}>stub-save</button>
         <button onClick={() => noteEditor.onCancel()}>stub-cancel</button>
       </div>
@@ -351,6 +358,23 @@ describe('Annotate opens the note editor at the selection', () => {
 
     expect(screen.getByTestId('note-editor-sheet')).toBeTruthy();
     expect(screen.queryByTestId('note-editor-popup')).toBeNull();
+  });
+
+  // #7511: Annotate highlights the selection first, and that highlight
+  // republishes the selection — which re-ran the selection effect and
+  // pulled focus back to the toolbar container, so the editor opened
+  // unfocused and typing hit the reader's page-turn shortcuts instead.
+  test('keeps keyboard focus in the note editor after Annotate (#7511)', async () => {
+    await annotate();
+
+    expect(document.activeElement).toBe(screen.getByTestId('note-editor-popup-input'));
+  });
+
+  test('keeps keyboard focus in the note editor on the sheet surface (#7511)', async () => {
+    setViewport(390, 844);
+    await annotate();
+
+    expect(document.activeElement).toBe(screen.getByTestId('note-editor-sheet-input'));
   });
 
   test('leaves the sidebar alone', async () => {

@@ -1434,6 +1434,13 @@ const Annotator: React.FC<{ bookKey: string; contentInsets: Insets; gridInsets?:
       // new text while one of these is up — they all sit over the page.
       if (showDictionaryPopup || showDeepLPopup || showProofreadPopup) return;
 
+      // The note editor owns the popup body once Annotate opens it, and the
+      // highlight Annotate creates republishes the selection (annotated) —
+      // which re-runs this effect. Re-showing the toolbar here would pull
+      // focus back to the toolbar container, leaving the editor unfocused
+      // so typing hits the reader's page-turn shortcuts (#7511).
+      if (noteEditorTarget) return;
+
       const { enableAnnotationQuickActions, annotationQuickAction } = viewSettings;
       if (wantWordLensDict) {
         // Route through handleDictionary so a Word Lens gloss tap honours the
