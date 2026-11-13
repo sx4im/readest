@@ -35,6 +35,10 @@ const stub = vi.hoisted(() => {
     return (
       <div data-testid={`note-editor-${surface}`}>
         <span data-testid={`note-editor-${surface}-value`}>{noteEditor.value}</span>
+        {/* Stands in for the real TextEditor's autoFocus: the editor focuses
+            its textarea on mount, so the input here does the same and lets the
+            test assert where keyboard focus ends up. */}
+        <input data-testid={`note-editor-${surface}-input`} autoFocus />
         <button onClick={() => noteEditor.onSave('a thought worth keeping')}>stub-save</button>
         <button onClick={() => noteEditor.onCancel()}>stub-cancel</button>
       </div>
@@ -343,6 +347,17 @@ describe('Annotate opens the note editor at the selection', () => {
     expect(screen.getByTestId('note-editor-popup')).toBeTruthy();
     expect(screen.queryByTestId('note-editor-sheet')).toBeNull();
     expect(liveAnnotations()).toHaveLength(1);
+  });
+
+  // #7511: Annotate opened the editor but the input never got focus — the
+  // highlight republished the selection, re-running the popup effect, which
+  // focused the reader container and stole focus back from the editor.
+  // Typing then hit the A/D page shortcuts instead of the note.
+  test('focuses the note input when Annotate opens the editor (#7511)', async () => {
+    await annotate();
+
+    expect(screen.getByTestId('note-editor-popup')).toBeTruthy();
+    expect(document.activeElement).toBe(screen.getByTestId('note-editor-popup-input'));
   });
 
   test('hands the editor to the bottom sheet on a phone-sized window', async () => {

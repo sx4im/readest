@@ -1505,7 +1505,12 @@ const Annotator: React.FC<{ bookKey: string; contentInsets: Insets; gridInsets?:
   }, [selection?.cfi, showAnnotationNotes, config.booknotes]);
 
   const handleShowAnnotPopup = () => {
-    if (!appService?.isMobile) {
+    // While the note editor is open, keyboard focus belongs to its input: the
+    // highlight Annotate creates republishes the selection, re-running the
+    // popup effect after the editor mounts, and focusing the reader container
+    // there steals focus back from the editor (#7511). Typing then hits the
+    // A/D page shortcuts instead of the note.
+    if (!appService?.isMobile && !noteEditorTarget) {
       containerRef.current?.focus();
     }
     setShowAnnotPopup(true);
