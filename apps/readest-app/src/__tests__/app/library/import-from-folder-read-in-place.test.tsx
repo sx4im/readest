@@ -94,4 +94,51 @@ describe('Import-from-Folder dialog: read-in-place toggle (#5680)', () => {
     expect(checkbox.checked).toBe(false);
     expect(checkbox.disabled).toBe(false);
   });
+
+  it('keeps an explicit in-place choice when picking an unregistered folder (#7519)', async () => {
+    const UNREGISTERED = '/Volumes/Books';
+    const { props } = setup({
+      initialDirectory: '/Users/me/Downloads',
+      initialReadInPlace: false,
+      onPickDirectory: vi.fn().mockResolvedValue(UNREGISTERED),
+    });
+
+    // Explicitly enable in-place reading before picking the folder.
+    fireEvent.click(getReadInPlaceCheckbox());
+    expect(getReadInPlaceCheckbox().checked).toBe(true);
+
+    fireEvent.click(screen.getByLabelText('Choose a folder'));
+    await waitFor(() => expect(props.onPickDirectory).toHaveBeenCalled());
+    // The explicit choice survives the folder pick.
+    expect(getReadInPlaceCheckbox().checked).toBe(true);
+
+    fireEvent.click(screen.getByText('OK'));
+    expect(props.onConfirm).toHaveBeenCalledWith(
+      expect.objectContaining({ directory: UNREGISTERED, readInPlace: true }),
+    );
+  });
+
+  it('keeps an explicit off choice when picking another registered folder', async () => {
+    const OTHER_REGISTERED = '/Users/me/OtherBooks';
+    const { props } = setup({
+      isRegisteredExternalRoot: (dir: string) => dir === REGISTERED || dir === OTHER_REGISTERED,
+      onPickDirectory: vi.fn().mockResolvedValue(OTHER_REGISTERED),
+    });
+
+    expect(getReadInPlaceCheckbox().checked).toBe(true);
+
+    // Explicitly uncheck on the registered folder (#5680).
+    fireEvent.click(getReadInPlaceCheckbox());
+    expect(getReadInPlaceCheckbox().checked).toBe(false);
+
+    fireEvent.click(screen.getByLabelText('Choose a folder'));
+    await waitFor(() => expect(props.onPickDirectory).toHaveBeenCalled());
+    // The explicit choice survives the folder pick in either direction.
+    expect(getReadInPlaceCheckbox().checked).toBe(false);
+
+    fireEvent.click(screen.getByText('OK'));
+    expect(props.onConfirm).toHaveBeenCalledWith(
+      expect.objectContaining({ directory: OTHER_REGISTERED, readInPlace: false }),
+    );
+  });
 });
