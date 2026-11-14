@@ -8,7 +8,8 @@ vi.mock('@/utils/supabase', () => ({
       onAuthStateChange: vi.fn(() => ({
         data: { subscription: { unsubscribe: vi.fn() } },
       })),
-      refreshSession: vi.fn().mockResolvedValue(undefined),
+      getSession: vi.fn().mockResolvedValue({ data: { session: null }, error: null }),
+      refreshSession: vi.fn().mockResolvedValue({ data: { session: null }, error: null }),
       signOut: vi.fn().mockResolvedValue(undefined),
     },
   },

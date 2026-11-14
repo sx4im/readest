@@ -1,13 +1,21 @@
 // @vitest-environment happy-dom
 import { cleanup, renderHook } from '@testing-library/react';
-import { afterEach, expect, it, vi } from 'vitest';
+import { afterEach, beforeEach, expect, it, vi } from 'vitest';
 import { AuthProvider, useAuth } from '@/context/AuthContext';
 
-const { refreshSession } = vi.hoisted(() => ({ refreshSession: vi.fn() }));
+beforeEach(() => {
+  localStorage.clear();
+});
+
+const { refreshSession, getSession } = vi.hoisted(() => ({
+  refreshSession: vi.fn(),
+  getSession: vi.fn().mockResolvedValue({ data: { session: null }, error: null }),
+}));
 vi.mock('@/utils/supabase', () => ({
   supabase: {
     auth: {
       refreshSession,
+      getSession,
       onAuthStateChange: () => ({ data: { subscription: { unsubscribe: vi.fn() } } }),
     },
   },

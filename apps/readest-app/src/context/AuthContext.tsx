@@ -6,6 +6,7 @@ import {
   useContext,
   useCallback,
   useMemo,
+  useRef,
   ReactNode,
   useEffect,
 } from 'react';
@@ -38,6 +39,13 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
     return null;
   });
 
+  // Set while logout() is signing out, so the SIGNED_OUT event that follows
+  // a user-initiated sign-out can be told apart from the one Supabase emits
+  // when a startup refresh fails. Only the former may clear the stored
+  // credentials: a failed refresh must not destroy the refresh token, or the
+  // session can never be restored without signing in again (#7538).
+  const signingOutRef = useRef(false);
+
   useEffect(() => {
     const syncSession = (
       session: { access_token: string; refresh_token: string; user: User } | null,
@@ -45,12 +53,21 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
       if (session) {
         console.log('Syncing session');
         const { access_token, refresh_token, user } = session;
-        localStorage.setItem('token', access_token);
-        localStorage.setItem('refresh_token', refresh_token);
-        localStorage.setItem('user', JSON.stringify(user));
-        posthog.identify(user.id);
-        setToken(access_token);
-        setUser(user);
+        // Guard the writes: a session missing a field must not store the
+        // string "undefined" in localStorage, which would corrupt the next
+        // launch (JSON.parse("undefined") throws in the state initializer).
+        if (access_token) {
+          localStorage.setItem('token', access_token);
+          setToken(access_token);
+        }
+        if (refresh_token) {
+          localStorage.setItem('refresh_token', refresh_token);
+        }
+        if (user) {
+          localStorage.setItem('user', JSON.stringify(user));
+          posthog.identify(user.id);
+          setUser(user);
+        }
       } else {
         localStorage.removeItem('token');
         localStorage.removeItem('refresh_token');
@@ -59,19 +76,57 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
         setUser(null);
       }
     };
-    const refreshSession = async () => {
+    const restoreSession = async () => {
+      // Supabase already tried to recover the stored session during client
+      // init; ask it what survived before doing any network call.
+      let session: {
+        access_token: string;
+        refresh_token: string;
+        user: User;
+        expires_at?: number;
+      } | null = null;
       try {
-        await supabase.auth.refreshSession();
+        session = (await supabase.auth.getSession()).data.session;
       } catch {
-        syncSession(null);
+        // getSession() should not throw on the real client; fall through to
+        // the stored-token re-seed below.
+      }
+      if (session && (session.expires_at ?? 0) * 1000 - Date.now() > 60_000) {
+        // Still valid: sync it and let Supabase's auto-refresh renew it in
+        // the background. Forcing a refresh here is what turned a transient
+        // failure into a sign-out.
+        syncSession(session);
+        return;
+      }
+      // Expired or gone: re-seed from Readest's own copy of the refresh
+      // token. Supabase's copy may already be gone (its init-time refresh
+      // removes the session on a non-retryable error), but ours survives
+      // unless the user explicitly signed out.
+      try {
+        const storedRefreshToken = localStorage.getItem('refresh_token');
+        const { data: refreshed, error } = storedRefreshToken
+          ? await supabase.auth.refreshSession({ refresh_token: storedRefreshToken })
+          : await supabase.auth.refreshSession();
+        if (!error && refreshed.session) {
+          syncSession(refreshed.session);
+        }
+      } catch {
+        // A failed restore must never wipe the stored credentials: the next
+        // launch can retry instead of forcing a fresh sign-in.
       }
     };
 
     const { data: subscription } = supabase.auth.onAuthStateChange((_, session) => {
-      syncSession(session);
+      if (session) {
+        syncSession(session);
+      } else if (signingOutRef.current) {
+        // User-initiated sign-out only. A null session after a failed
+        // refresh must not wipe the stored refresh token (#7538).
+        syncSession(null);
+      }
     });
 
-    refreshSession();
+    restoreSession();
     return () => {
       subscription?.subscription.unsubscribe();
     };
@@ -96,8 +151,14 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
       await supabase.auth.refreshSession();
     } catch {
     } finally {
-      await supabase.auth.signOut({ scope: 'local' });
+      signingOutRef.current = true;
+      try {
+        await supabase.auth.signOut({ scope: 'local' });
+      } finally {
+        signingOutRef.current = false;
+      }
       localStorage.removeItem('token');
+      localStorage.removeItem('refresh_token');
       localStorage.removeItem('user');
       setToken(null);
       setUser(null);
