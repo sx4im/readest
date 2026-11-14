@@ -695,3 +695,154 @@ describe('FootnotePopup jump to location', () => {
     });
   });
 });
+
+describe('FootnotePopup strict-check failure (#7537)', () => {
+  const getHandler = () =>
+    hoisted.handlers[hoisted.handlers.length - 1] as unknown as {
+      handle: ReturnType<typeof vi.fn>;
+    };
+  const flush = async () => {
+    await act(async () => {
+      await new Promise((resolve) => setTimeout(resolve, 0));
+    });
+  };
+  // Drive a link click through docLinkHandler. The mocked
+  // shouldCheckAsFootnote returns false, so pass check in the detail to
+  // stand in for a numeric footnote marker.
+  const clickFootnoteLink = async (check = true) => {
+    const anchor = document.createElement('a');
+    anchor.setAttribute('href', HREF);
+    document.body.appendChild(anchor);
+    await act(async () => {
+      hoisted.onLinkClick.current?.(
+        new CustomEvent('link', {
+          detail: { a: anchor, href: HREF, check },
+          cancelable: true,
+        }),
+      );
+    });
+    await flush();
+  };
+  const roCallbacks: Array<() => void> = [];
+
+  beforeEach(() => {
+    document.body.replaceChildren();
+    hoisted.handlers.length = 0;
+    hoisted.onLinkClick.current = null;
+    hoisted.goTo.mockReset();
+    hoisted.showTransientHighlight.mockReset().mockResolvedValue(null);
+    hoisted.isLinkTargetVisible.mockReset().mockReturnValue(true);
+    roCallbacks.length = 0;
+    vi.stubGlobal(
+      'ResizeObserver',
+      class {
+        constructor(cb: () => void) {
+          roCallbacks.push(cb);
+        }
+        observe() {}
+        disconnect() {}
+        unobserve() {}
+      },
+    );
+    vi.stubGlobal('requestAnimationFrame', (cb: FrameRequestCallback) => {
+      cb(0);
+      return 0;
+    });
+    vi.stubGlobal('cancelAnimationFrame', () => {});
+  });
+
+  afterEach(() => {
+    vi.unstubAllGlobals();
+  });
+
+  // The repro book's footnote paragraph carries inline formatting, so
+  // foliate's strict check rejects it and the tap used to jump to the note
+  // instead of opening it. Retrying once without the check extracts the
+  // note itself, so the popup opens and the main view stays put.
+  it('retries without the strict check and opens the note, without jumping', async () => {
+    await renderPopup();
+    const handler = getHandler();
+    const handleMock = handler.handle;
+    const seenChecks: unknown[] = [];
+    handleMock.mockImplementation((...args: unknown[]) => {
+      seenChecks.push((args[1] as CustomEvent).detail?.check);
+      return Promise.resolve();
+    });
+    handleMock.mockRejectedValueOnce(new Error('Failed to locate footnote content'));
+
+    await clickFootnoteLink();
+
+    expect(handleMock).toHaveBeenCalledTimes(2);
+    expect(seenChecks).toEqual([undefined]);
+    expect(hoisted.goTo).not.toHaveBeenCalled();
+
+    const view = createPopupView();
+    await act(async () => {
+      handler.dispatchEvent(new CustomEvent('before-render', { detail: { view } }));
+      handler.dispatchEvent(
+        new CustomEvent('render', { detail: { view, href: HREF, index: 3, extract: null } }),
+      );
+      view.dispatchEvent(new CustomEvent('relocate', { detail: {} }));
+    });
+    expect(screen.getByTestId('popup').dataset['open']).toBe('true');
+  });
+
+  // When the note is genuinely unlocatable the lenient attempt fails too,
+  // and the old fallback (jump to the target) still applies, once.
+  it('jumps only when the lenient retry fails too', async () => {
+    await renderPopup();
+    const handler = getHandler();
+    handler.handle.mockRejectedValue(new Error('Failed to locate footnote content'));
+
+    await clickFootnoteLink();
+
+    expect(handler.handle).toHaveBeenCalledTimes(2);
+    expect(hoisted.goTo).toHaveBeenCalledTimes(1);
+    expect(hoisted.goTo).toHaveBeenCalledWith(HREF);
+    expect(screen.getByTestId('popup').dataset['open']).toBe('false');
+  });
+
+  // A failed extraction leaves the popup view holding the whole pristine
+  // section; its content-size observer used to open the popup over that
+  // chapter content anyway. The observer must only show a rendered note.
+  it('does not open the popup from content size when extraction failed', async () => {
+    await renderPopup();
+    await clickFootnoteLink(false);
+    const handler = getHandler();
+    const view = createPopupView();
+    const doc = document.implementation.createHTMLDocument();
+    await act(async () => {
+      handler.dispatchEvent(new CustomEvent('before-render', { detail: { view } }));
+      view.dispatchEvent(new CustomEvent('load', { detail: { doc, index: 3 } }));
+    });
+
+    expect(roCallbacks.length).toBe(1);
+    await act(async () => {
+      roCallbacks[0]?.();
+    });
+
+    expect(screen.getByTestId('popup').dataset['open']).toBe('false');
+  });
+
+  it('still opens the popup from content size once the note rendered', async () => {
+    await renderPopup();
+    await clickFootnoteLink(false);
+    const handler = getHandler();
+    const view = createPopupView();
+    const doc = document.implementation.createHTMLDocument();
+    await act(async () => {
+      handler.dispatchEvent(new CustomEvent('before-render', { detail: { view } }));
+      handler.dispatchEvent(
+        new CustomEvent('render', { detail: { view, href: HREF, index: 3, extract: null } }),
+      );
+      view.dispatchEvent(new CustomEvent('load', { detail: { doc, index: 3 } }));
+    });
+
+    expect(roCallbacks.length).toBe(1);
+    await act(async () => {
+      roCallbacks[0]?.();
+    });
+
+    expect(screen.getByTestId('popup').dataset['open']).toBe('true');
+  });
+});

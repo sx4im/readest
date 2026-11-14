@@ -187,6 +187,11 @@ const FootnotePopup: React.FC<FootnotePopupProps> = ({
   const maxSizeAdjustCount = 3;
   const contentSizeObserverRef = useRef<ResizeObserver | null>(null);
   const contentSizeFrameRef = useRef<number | null>(null);
+  // Set only by the footnote handler's render event, which fires when the
+  // extraction found the note. Until then the popup view holds the whole
+  // unextracted section, and a measured content size must not open the
+  // popup over it (#7537).
+  const footnoteRenderConfirmedRef = useRef(false);
   const size18 = useResponsiveSize(18);
   const popupPadding = useResponsiveSize(10);
 
@@ -267,7 +272,8 @@ const FootnotePopup: React.FC<FootnotePopupProps> = ({
         // good: an element-only visible range collapses, so foliate's paginator
         // returns before it ever dispatches `relocate`. A measured content size
         // is the same promise that event was standing in for.
-        if (fitPopupToContent(view) > 0) setShowPopup(true);
+        if (fitPopupToContent(view) > 0 && footnoteRenderConfirmedRef.current)
+          setShowPopup(true);
       });
     });
     observer.observe(doc.documentElement);
@@ -315,6 +321,9 @@ const FootnotePopup: React.FC<FootnotePopupProps> = ({
     const handleBeforeRender = (e: Event) => {
       const detail = (e as CustomEvent).detail;
       const { view: popupView } = detail;
+      // A new popup view starts unconfirmed: its document is the whole
+      // section until the handler's render event says the note was found.
+      footnoteRenderConfirmedRef.current = false;
       // Whether the Annotator is showing a text selection reported from this
       // view, as opposed to nothing or a highlight's toolbar opened by a tap.
       let selectionReported = false;
@@ -514,6 +523,7 @@ const FootnotePopup: React.FC<FootnotePopupProps> = ({
       const detail = (e as CustomEvent).detail;
       // console.log('render footnote', detail);
       const { view, href, index, extract } = detail;
+      footnoteRenderConfirmedRef.current = true;
       const popupDoc = (view as FoliateView).renderer.getContents?.()[0]?.doc;
       if (popupDoc) applyLinkHitArea(popupDoc);
       footnoteHrefRef.current = href;
@@ -647,16 +657,30 @@ const FootnotePopup: React.FC<FootnotePopupProps> = ({
       detail['follow'] = true;
     }
     if (shouldCheckAsFootnote(anchor)) {
-      detail['check'] = true;
+      detail.check = true;
     }
     historyRef.current = { items: [detail], index: 0 };
     setCanGoBack(false);
     setToolbarBlock(null);
     const popupPromise = footnoteHandler.handle(bookDoc, event);
     if (popupPromise) {
-      popupPromise.catch((err: unknown) => {
-        console.warn(err);
+      popupPromise.catch(async (err: unknown) => {
         const detail = (event as CustomEvent).detail;
+        if (detail.check) {
+          // Foliate's strict footnote check rejects a note whose paragraph
+          // carries inline formatting: its >3-children guard counts <em> and
+          // <a> children as structure (#7537). Retry once without the check
+          // so the note itself opens in the popup instead of jumping to it;
+          // the follow path already extracts leniently.
+          delete detail.check;
+          try {
+            await footnoteHandler.handle(bookDoc, event);
+            return;
+          } catch {
+            // The lenient attempt failed too: fall through to the jump below.
+          }
+        }
+        console.warn(err);
         view?.goTo(detail.href);
         flashLinkTarget(detail.href);
       });
