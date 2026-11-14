@@ -56,6 +56,12 @@ const CLIP_CONTINUITY_TOLERANCE_SEC = 0.3;
 // short enough that narration can never be left running unattended.
 const HANDOVER_GRACE_MS = 1000;
 
+// How long a proxied element gets to prove its URL loads before the client
+// gives up waiting and hands it over as-is. A loopback URL a sandboxed
+// WebView cannot reach errors immediately; only a proxy that never answers
+// waits this out, and the element then plays (or fails) exactly as before.
+const MEDIA_PROXY_LOAD_TIMEOUT_MS = 2000;
+
 // Container blobs come out of the zip with no MIME type, and a media element
 // given a typeless blob URL refuses to decode it ("Format error"), so the type
 // has to be supplied from the file name. Covers the formats EPUB Media Overlays
@@ -361,9 +367,49 @@ export class MediaOverlayClient implements TTSClient {
     // Speed changes must not raise the narrator's pitch.
     audio.preservesPitch = true;
     audio.playbackRate = this.#rate;
+    if (mediaUrl && url === mediaUrl && !(await this.#proxyUrlLoads(audio))) {
+      // A stored entry plays through the loopback proxy, but a sandboxed
+      // WebView (Flatpak) cannot reach it: the element errors before a byte
+      // loads and narration dies with no message (#7521). Fall back to the
+      // blob the compressed path already uses.
+      signal?.throwIfAborted();
+      const blob = audioBlobWithType(href, await this.#source.loadBlob(href));
+      const blobUrl = URL.createObjectURL(blob);
+      audio.src = blobUrl;
+      this.#objectUrl = blobUrl;
+    }
     this.#audio = audio;
     this.#audioHref = href;
     return audio;
+  }
+
+  // Wait until the element can play its proxied URL, or errors. A loopback
+  // URL a sandboxed WebView cannot reach errors immediately; a proxy that
+  // never answers is given up on after the deadline and the element is
+  // returned as-is, exactly as before.
+  async #proxyUrlLoads(audio: HTMLAudioElement): Promise<boolean> {
+    if (audio.readyState >= 2 || audio.error) return !audio.error;
+    return await new Promise<boolean>((resolve) => {
+      const cleanup = () => {
+        audio.removeEventListener('canplay', onCanPlay);
+        audio.removeEventListener('error', onError);
+        clearTimeout(timer);
+      };
+      const onCanPlay = () => {
+        cleanup();
+        resolve(true);
+      };
+      const onError = () => {
+        cleanup();
+        resolve(false);
+      };
+      audio.addEventListener('canplay', onCanPlay, { once: true });
+      audio.addEventListener('error', onError, { once: true });
+      const timer = setTimeout(() => {
+        cleanup();
+        resolve(true);
+      }, MEDIA_PROXY_LOAD_TIMEOUT_MS);
+    });
   }
 
   // Leave the element playing for the next block to pick up, but never

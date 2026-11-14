@@ -85,6 +85,9 @@ class FakeAudio {
   fireError(): void {
     this.#emit('error');
   }
+  fireCanplay(): void {
+    this.#emit('canplay');
+  }
 }
 
 const par = (id: string, begin: number, end: number, audio = 'ch1.mp3') =>
@@ -259,7 +262,12 @@ describe('MediaOverlayClient capabilities', () => {
     mediaFileUrl.mockResolvedValueOnce('http://127.0.0.1:9/s/file/f1');
 
     const iter = client.speak(section.ssmlForBlock(0)!, new AbortController().signal);
-    await iter.next();
+    const pending = iter.next();
+    // The client waits for the proxied element to prove it can load; drive it
+    // past the probe the way a real element loading from the proxy would.
+    while (!FakeAudio.instances.length) await new Promise((r) => setTimeout(r, 0));
+    audio().fireCanplay();
+    await pending;
 
     expect(book.loadBlob).not.toHaveBeenCalled();
     expect(mediaFileUrl).toHaveBeenCalledWith('/books/narrated.epub', 120, 4216, 'audio/mpeg');
@@ -390,6 +398,29 @@ describe('MediaOverlayClient capabilities', () => {
 
     const iter = client.speak(section.ssmlForBlock(0)!, new AbortController().signal);
     await iter.next();
+
+    expect(book.loadBlob).toHaveBeenCalledWith('OEBPS/ch1.mp3');
+    expect(audio().src).toBe('blob:audio');
+  });
+
+  // A sandboxed WebView (Flatpak) cannot reach the loopback proxy, so the
+  // element errors before a byte loads (#7521). The client must fall back
+  // to the blob the compressed path already uses instead of dying silent.
+  test('falls back to the blob when the media proxy URL fails to load', async () => {
+    await setup();
+    (book as { getMediaSource?: unknown }).getMediaSource = vi.fn(async () => ({
+      path: '/books/narrated.epub',
+      start: 120,
+      end: 4216,
+    }));
+    client.attachBook(book);
+    mediaFileUrl.mockResolvedValueOnce('http://127.0.0.1:9/s/file/f1');
+
+    const iter = client.speak(section.ssmlForBlock(0)!, new AbortController().signal);
+    const pending = iter.next();
+    while (!FakeAudio.instances.length) await new Promise((r) => setTimeout(r, 0));
+    audio().fireError();
+    expect((await pending).value?.code).toBe('boundary');
 
     expect(book.loadBlob).toHaveBeenCalledWith('OEBPS/ch1.mp3');
     expect(audio().src).toBe('blob:audio');
