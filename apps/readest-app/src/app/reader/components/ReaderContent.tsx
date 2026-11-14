@@ -434,9 +434,10 @@ const ReaderContent: React.FC<{ ids?: string; settings: SystemSettings }> = ({ i
         const openWithFiles = (await parseOpenWithFiles(appService)) || [];
         if (appService?.hasWindow) {
           if (openWithFiles.length > 0) {
-            void tauriHandleOnCloseWindow(handleCloseBooks).catch((error) => {
-              console.info('Failed to register close-window listener:', error);
-            });
+            // The window-close listener registered by the effect above
+            // already owns the save-before-close cleanup; registering a
+            // second one here would run it twice and could destroy the
+            // window twice (#7516).
             await tauriHandleClose();
             return;
           }

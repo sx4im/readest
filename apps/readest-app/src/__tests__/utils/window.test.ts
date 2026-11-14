@@ -129,6 +129,53 @@ describe('tauriHandleOnCloseWindow', () => {
     vi.advanceTimersByTime(300);
     expect(win.destroy).toHaveBeenCalled();
   });
+
+  test('ignores a second close request while the first cleanup is still running (#7516)', async () => {
+    // On Linux/CEF a Ctrl+W can raise CloseRequested twice — the shortcut's
+    // close() and the browser's own Ctrl+W handling — and a second destroy()
+    // on a window that is already being destroyed crashes the browser
+    // process. The cleanup and the destroy must run exactly once.
+    vi.mocked(osType).mockReturnValue('linux');
+    const { win, trigger } = makeWindow('reader-0');
+    vi.mocked(getCurrentWindow).mockReturnValue(
+      win as unknown as ReturnType<typeof getCurrentWindow>,
+    );
+
+    const resolvers: Array<() => void> = [];
+    const callback = vi.fn(() => new Promise<void>((resolve) => void resolvers.push(resolve)));
+    await tauriHandleOnCloseWindow(callback);
+    const first = trigger();
+    const second = trigger();
+    resolvers.forEach((resolve) => resolve());
+    await first;
+    await second;
+
+    expect(callback).toHaveBeenCalledTimes(1);
+    await vi.advanceTimersByTimeAsync(300);
+    expect(win.destroy).toHaveBeenCalledTimes(1);
+  });
+
+  test('lets a later close retry after a failed cleanup', async () => {
+    // A cleanup that throws must not wedge the window shut: the next close
+    // request runs the cleanup again instead of being swallowed by the guard.
+    vi.mocked(osType).mockReturnValue('linux');
+    const { win, trigger } = makeWindow('reader-0');
+    vi.mocked(getCurrentWindow).mockReturnValue(
+      win as unknown as ReturnType<typeof getCurrentWindow>,
+    );
+
+    const callback = vi
+      .fn()
+      .mockRejectedValueOnce(new Error('save failed'))
+      .mockResolvedValue(undefined);
+    await tauriHandleOnCloseWindow(callback);
+    await expect(trigger()).rejects.toThrow('save failed');
+    await trigger();
+
+    expect(callback).toHaveBeenCalledTimes(2);
+    await vi.advanceTimersByTimeAsync(300);
+    expect(win.destroy).toHaveBeenCalledTimes(1);
+  });
 });
 
 function makeFullscreenWindow({

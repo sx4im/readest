@@ -125,6 +125,14 @@ export const tauriHandleClose = async () => {
   getCurrentWindow().close();
 };
 
+// A close request can arrive twice for one keypress on Linux/CEF: the
+// shortcut's `close()` and the browser's own Ctrl+W handling both raise
+// CloseRequested, and a second `destroy()` on a window that is already
+// being destroyed crashes the CEF browser process (#7516). The cleanup and
+// the destroy therefore run exactly once per window; a later request while
+// one is in flight is ignored.
+let closeInProgress = false;
+
 export const tauriHandleOnCloseWindow = async (callback: () => void) => {
   const currentWindow = getCurrentWindow();
   return await currentWindow.onCloseRequested(async (event) => {
@@ -136,13 +144,35 @@ export const tauriHandleOnCloseWindow = async (callback: () => void) => {
     if (currentWindow.label === 'main' && (await osType()) === 'macos') {
       return;
     }
-    await callback();
-    if (currentWindow.label.startsWith('reader')) {
-      await emitTo('main', 'close-reader-window', { label: currentWindow.label });
-      setTimeout(() => currentWindow.destroy(), 300);
-    } else if (currentWindow.label === 'main') {
-      await currentWindow.destroy();
+    // A second close request while the first cleanup is still running (a
+    // repeated Ctrl+W, or the native close racing the shortcut's): the
+    // first run already owns the destroy, so ignore it.
+    if (closeInProgress) return;
+    closeInProgress = true;
+    try {
+      await callback();
+      if (currentWindow.label.startsWith('reader')) {
+        await emitTo('main', 'close-reader-window', { label: currentWindow.label });
+        setTimeout(() => {
+          currentWindow
+            .destroy()
+            .catch(() => {})
+            .finally(() => {
+              closeInProgress = false;
+            });
+        }, 300);
+        return;
+      }
+      if (currentWindow.label === 'main') {
+        await currentWindow.destroy();
+      }
+    } catch (error) {
+      // A failed cleanup must not wedge the window shut: let a later close
+      // request retry it instead of being swallowed by the guard.
+      closeInProgress = false;
+      throw error;
     }
+    closeInProgress = false;
   });
 };
 
