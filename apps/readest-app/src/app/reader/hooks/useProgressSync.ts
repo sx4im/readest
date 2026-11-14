@@ -19,6 +19,7 @@ import { eventDispatcher } from '@/utils/event';
 import { DEFAULT_BOOK_SEARCH_CONFIG, SYNC_PROGRESS_INTERVAL_SEC } from '@/services/constants';
 import { getCFIFromXPointer, getXPointerFromCFI } from '@/utils/xcfi';
 import { isMalformedLocationCfi } from '@/utils/cfi';
+import { hasLiveTextSelection } from '@/app/reader/utils/liveSelection';
 import { useWindowActiveChanged } from './useWindowActiveChanged';
 
 // Backoff schedule for the first-pull retry on book open. After these
@@ -406,6 +407,7 @@ export const useProgressSync = (bookKey: string) => {
       if (
         view &&
         !isPreviewing() &&
+        !hasLiveTextSelection(view) &&
         siblingFraction > exactFraction &&
         siblingFraction > localFraction + SIBLING_FORWARD_EPSILON
       ) {
@@ -450,9 +452,11 @@ export const useProgressSync = (bookKey: string) => {
           const remoteIsAhead = !configCFI || CFI.compare(configCFI, remoteCFILocation) < 0;
           // While previewing a deep-link target, do NOT yank the view to the
           // remote position — the user came here to look at a specific
-          // annotation. The local config still gets updated; the next open
-          // resolves to the synced position normally.
-          if (remoteIsAhead && view && !isPreviewing()) {
+          // annotation. The same holds while the user has a live text
+          // selection: the jump re-renders the section and clears it (#7522).
+          // The local config still gets updated; the next open resolves to
+          // the synced position normally.
+          if (remoteIsAhead && view && !isPreviewing() && !hasLiveTextSelection(view)) {
             view.goTo(remoteCFILocation);
             announceSynced();
           }
