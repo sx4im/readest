@@ -758,6 +758,14 @@ export const useTextSelector = (
   };
 
   const handlePointerDown = (doc: Document, index: number, ev: PointerEvent) => {
+    // A new gesture drops any stale isUpToPopup latch from a previous one
+    // (#7522): the latch guards the trailing click of the drag that sets
+    // it, and it is consumed by that click or by the next pointerdown.
+    // It must NOT expire on a wall clock — the trailing click is deferred
+    // 250ms by the double-click detector and can arrive after the popup
+    // timer on a busy main thread, which used to deselect the just-made
+    // selection.
+    isUpToPopup.current = false;
     navigatedSelectionRef.current = false;
     beginSelectionDrag();
     setImageHoldClick(bookKey, null);
@@ -1349,10 +1357,13 @@ export const useTextSelector = (
   };
 
   const handleShowPopup = (showPopup: boolean) => {
+    // The 500ms delay only gates isPopuped (the grace period before a
+    // click may dismiss the popup). It must not clear isUpToPopup: the
+    // latch belongs to the gesture, not to the popup timer (#7522) — the
+    // trailing click is deferred 250ms and can arrive after this timer
+    // fires, which used to deselect the just-made selection. The latch
+    // is cleared by the next pointerdown or consumed by the click.
     setTimeout(() => {
-      if (showPopup && !isPopuped.current) {
-        isUpToPopup.current = false;
-      }
       isPopuped.current = showPopup;
     }, 500);
   };
