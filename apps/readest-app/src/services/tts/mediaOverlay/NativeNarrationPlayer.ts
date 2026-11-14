@@ -201,9 +201,12 @@ export class NativeNarrationPlayer {
     after: string | null = null,
     signal?: AbortSignal,
   ): Promise<boolean> {
-    // Preserve the seekable browser path for MP3 and formats the Rust decoder
-    // cannot play (Ogg can contain Opus).
-    if (!this.supportsStreaming && /\.(mp3|ogg|oga|opus|webm)$/i.test(href)) return false;
+    // Preserve the seekable browser path for formats the Rust decoder cannot
+    // play (Ogg can contain Opus; WebM is a Matroska container Symphonia
+    // cannot demux). MP3 plays natively: the Linux decoder ships Symphonia's
+    // mp3 codec, and the browser path fails for it in the Flatpak, where a
+    // stored entry reaches the media proxy instead of a blob (#7521).
+    if (!this.supportsStreaming && /\.(ogg|oga|opus|webm)$/i.test(href)) return false;
     const path = await source.resolvePath?.(href).catch(() => null);
     signal?.throwIfAborted();
     if (path && (this.supportsStreaming || path.startsWith('/'))) {

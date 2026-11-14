@@ -39,13 +39,15 @@ points, which is why read-along playback needs no alignment of its own.
 ### Audio support on Linux
 
 Standard Linux CEF builds omit AAC decoding. Local narration uses Rust audio
-playback for AAC-LC and ALAC in MP4/M4A/M4B, FLAC and PCM WAV. Audio is decoded
-on a worker and sent to the system audio device; playback speed preserves
-pitch. Remote recordings and local MP3/Ogg/Opus/WebM audio retain WebView
-playback. This preserves MP3 seeking and supports Opus, which can also be
-carried in Ogg and is not supported by the native decoder. Compressed
-MP3/Ogg/Opus/WebM EPUB entries play from an in-memory blob without writing an
-extracted file to the app cache.
+playback for AAC-LC and ALAC in MP4/M4A/M4B, FLAC and PCM WAV, and for MP3.
+Audio is decoded on a worker and sent to the system audio device; playback
+speed preserves pitch. Remote recordings and local Ogg/Opus/WebM audio retain
+WebView playback. This supports Opus, which can also be carried in Ogg and is
+not supported by the native decoder. Compressed Ogg/Opus/WebM EPUB entries
+play from an in-memory blob without writing an extracted file to the app
+cache. MP3 used to stay on the WebView path too, but a stored MP3 entry
+reaches the media proxy there, which the Flatpak WebView cannot play, so MP3
+plays natively on Linux as well (#7521).
 
 For native playback, stored EPUB entries are read as byte windows in the book.
 DEFLATE-compressed entries are read directly through an in-memory checkpoint

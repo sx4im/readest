@@ -146,8 +146,60 @@ describe('NativeNarrationPlayer source selection', () => {
     }
   });
 
+  test('opens a compressed mp3 entry without staging it', async () => {
+    const player = new NativeNarrationPlayer({ isLinuxApp: true } as AppService);
+    const loadBlob = vi.fn(async () => new Blob([new Uint8Array(8)]));
+    try {
+      expect(
+        await player.loadSource(
+          'chapter.mp3',
+          {
+            loadBlob,
+            getMediaSource: async () => ({ path: '/books/book.epub', entry: 'audio/chapter.mp3' }),
+          },
+          'audio/mpeg',
+        ),
+      ).toBe(true);
+      expect(controlCalls.find((call) => call['action'] === 'load')).toMatchObject({
+        path: '/books/book.epub',
+        entry: 'audio/chapter.mp3',
+        contentType: 'audio/mpeg',
+      });
+      expect(loadBlob).not.toHaveBeenCalled();
+      expect(writeFile).not.toHaveBeenCalled();
+    } finally {
+      await player.shutdown();
+    }
+  });
+
+  test('loads a stored mp3 window through native playout', async () => {
+    const player = new NativeNarrationPlayer({ isLinuxApp: true } as AppService);
+    const loadBlob = vi.fn(async () => new Blob([new Uint8Array(8)]));
+    try {
+      expect(
+        await player.loadSource(
+          'chapter.mp3',
+          {
+            loadBlob,
+            getMediaSource: async () => ({ path: '/books/book.epub', start: 120, end: 4216 }),
+          },
+          'audio/mpeg',
+        ),
+      ).toBe(true);
+      expect(controlCalls.find((call) => call['action'] === 'load')).toMatchObject({
+        path: '/books/book.epub',
+        start: 120,
+        end: 4216,
+        contentType: 'audio/mpeg',
+      });
+      expect(loadBlob).not.toHaveBeenCalled();
+      expect(writeFile).not.toHaveBeenCalled();
+    } finally {
+      await player.shutdown();
+    }
+  });
+
   test.each([
-    'chapter.mp3',
     'chapter.opus',
     'chapter.webm',
   ])('declines %s before resolving its source', async (href) => {

@@ -267,12 +267,48 @@ describe('MediaOverlayClient capabilities', () => {
     expect(createObjectURL).not.toHaveBeenCalled();
   });
 
+  // A stored MP3 entry on Linux reaches the media proxy on the WebView path,
+  // which the Flatpak WebView cannot play (#7521): it goes through native
+  // playout instead, like the stored AAC window.
+  test('plays a stored Linux mp3 entry through native playout', async () => {
+    [section, book] = await makeSection(WORD_SMIL);
+    nativeInvoke.mockClear();
+    mediaFileUrl.mockClear();
+    writeFile.mockClear();
+    client = new MediaOverlayClient(undefined, { isLinuxApp: true } as AppService);
+    await client.init();
+    (book as { getMediaSource?: unknown }).getMediaSource = vi.fn(async () => ({
+      path: '/books/narrated.epub',
+      start: 120,
+      end: 4216,
+    }));
+    client.attachBook(book);
+    client.setSection(section);
+
+    const iter = client.speak(section.ssmlForBlock(0)!, new AbortController().signal);
+
+    expect((await iter.next()).value?.code).toBe('boundary');
+    expect(book.loadBlob).not.toHaveBeenCalled();
+    expect(createObjectURL).not.toHaveBeenCalled();
+    expect(mediaFileUrl).not.toHaveBeenCalled();
+    const load = nativeInvoke.mock.calls
+      .map((call) => call[1] as { payload?: Record<string, unknown> })
+      .find((args) => args?.payload?.['action'] === 'load');
+    expect(load?.payload).toMatchObject({
+      path: '/books/narrated.epub',
+      start: 120,
+      end: 4216,
+      contentType: 'audio/mpeg',
+    });
+    expect(writeFile).not.toHaveBeenCalled();
+    await client.shutdown();
+  });
+
   test.each([
     'opus',
     'webm',
     'ogg',
     'oga',
-    'mp3',
   ])('plays a compressed Linux %s entry through an HTML blob without staging on disk', async (extension) => {
     [section, book] = await makeSection(par('p1', 0, 3, `chapter.${extension}`));
     nativeInvoke.mockClear();
@@ -291,7 +327,7 @@ describe('MediaOverlayClient capabilities', () => {
     expect((await iter.next()).value?.code).toBe('boundary');
     expect(audio()?.src).toBe('blob:audio');
     expect(createObjectURL.mock.lastCall?.[0].type).toBe(
-      extension === 'mp3' ? 'audio/mpeg' : extension === 'webm' ? 'audio/webm' : 'audio/ogg',
+      extension === 'webm' ? 'audio/webm' : 'audio/ogg',
     );
     expect(loadBlob).toHaveBeenCalledWith(href);
     expect(
@@ -306,7 +342,6 @@ describe('MediaOverlayClient capabilities', () => {
     'webm',
     'ogg',
     'oga',
-    'mp3',
   ])('keeps a paired local Linux %s file on its HTML streaming URL', async (extension) => {
     [section] = await makeSection(par('p1', 0, 3, `chapter.${extension}`));
     nativeInvoke.mockClear();
