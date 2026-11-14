@@ -62,6 +62,11 @@ const INSTANT_HOLD_MOVE_PX = 10;
 // than resting on it. A long press drifts a pixel or two, and taking that drift
 // for a drag let the long-press selection arm the corner turn by itself.
 const SELECTION_DRAG_SLOP_PX = 10;
+// How long after a selection is published its range may be put back when the
+// engine drops it with no new gesture behind the clear (#7522). Long enough
+// to cover the popup showing on a slow frame, short enough that a deliberate
+// dismiss a beat later (Escape, an arrow key collapsing the range) still lands.
+const PUBLISHED_SELECTION_RESTORE_WINDOW_MS = 500;
 // Ignore tiny pointer jitter, but preserve a deliberate double-click-drag even
 // when it only extends the selection into adjacent whitespace.
 const DOUBLE_CLICK_DRAG_MOVE_PX = 3;
@@ -183,6 +188,14 @@ export const useTextSelector = (
   // the toolbar, never the instant quick action. Ends at the next pointer press
   // or when the selection is cleared.
   const navigatedSelectionRef = useRef(false);
+  // The selection the reader just published, with when it was published. In
+  // books with Media Overlays the engine can empty the DOM selection in the
+  // same frame the annotation popup shows (#7522), before the user makes any
+  // new gesture — that cleared report must put the range back instead of
+  // dismissing the popup it just opened. A real dismiss always starts with a
+  // pointer press, which clears this record, so only a gesture-less clear
+  // inside the window is restored.
+  const publishedSelectionRef = useRef<{ range: Range; at: number } | null>(null);
 
   // Cross-page selection (#5809). Fixed-layout pages are separate iframes, so a
   // selection dragged onto the next page is kept as one native selection per
@@ -571,6 +584,9 @@ export const useTextSelector = (
       handlesSuppressed,
       ...(navigated && { quickActionHandled: true }),
     });
+    // Remember what was published, so a gesture-less clear in the next frame
+    // can put it back instead of dismissing the popup (#7522).
+    publishedSelectionRef.current = { range: range.cloneRange(), at: Date.now() };
   };
 
   const handleRendererRelocate = (event: Event) => {
@@ -759,6 +775,9 @@ export const useTextSelector = (
 
   const handlePointerDown = (doc: Document, index: number, ev: PointerEvent) => {
     navigatedSelectionRef.current = false;
+    // A new gesture invalidates the just-published record: a clear from here
+    // on is the user's own doing, not the engine dropping it (#7522).
+    publishedSelectionRef.current = null;
     beginSelectionDrag();
     setImageHoldClick(bookKey, null);
     lastPointerType.current = ev.pointerType;
@@ -1321,6 +1340,24 @@ export const useTextSelector = (
       makeSelection(sel, index, false, false, null, touchWordGesture);
     } else {
       // Selection cleared (e.g. clicking outside the selection).
+      // A clear that lands just after a publish, with no new gesture behind
+      // it, is the engine dropping the range the reader just published
+      // (#7522) — put it back instead of dismissing the popup it just
+      // opened. Deliberate dismisses never reach this branch fresh: a tap
+      // starts with a pointer press (which clears the record), a toolbar
+      // action clears isTextSelected, and a vim-find selection is navigated.
+      const published = publishedSelectionRef.current;
+      if (
+        published &&
+        isTextSelected.current &&
+        !isPointerDown.current &&
+        !navigatedSelectionRef.current &&
+        Date.now() - published.at < PUBLISHED_SELECTION_RESTORE_WINDOW_MS &&
+        restoreSelectionRange(published.range)
+      ) {
+        return;
+      }
+      publishedSelectionRef.current = null;
       // Dismiss immediately on all platforms.
       navigatedSelectionRef.current = false;
       if (isTextSelected.current) {
