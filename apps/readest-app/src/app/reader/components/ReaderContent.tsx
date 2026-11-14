@@ -410,10 +410,11 @@ const ReaderContent: React.FC<{ ids?: string; settings: SystemSettings }> = ({ i
 
   const handleCloseBook = async (bookKey: string) => {
     // Header X / pane close: an SPA-side close on web and the main window.
-    // The Tauri reader-window branches below destroy their webview, which
-    // takes the per-window TTS with it either way.
-    const closeBook = async () => {
-      await saveConfigAndCloseBook(bookKey, true);
+    // The Tauri reader-window branches below destroy their webview — but the
+    // native narration player outlives the webview, so a close that destroys
+    // it must hard-stop TTS instead of detaching it to headless (#7523).
+    const closeBook = async (keepTTSAlive = true) => {
+      await saveConfigAndCloseBook(bookKey, keepTTSAlive);
       if (sideBarBookKey === bookKey) {
         setSideBarBookKey(getNextBookKey(sideBarBookKey));
       }
@@ -429,9 +430,18 @@ const ReaderContent: React.FC<{ ids?: string; settings: SystemSettings }> = ({ i
         });
         return;
       }
-      await closeBook();
+      // Closing the last book in a reader window destroys the webview: stop
+      // the narration before the close, while the TTS hook is still mounted
+      // to hear it — nothing survives the window to stop it afterwards.
+      const openWithFiles = isLastBook
+        ? (await parseOpenWithFiles(appService).catch(() => [])) || []
+        : [];
+      const willDestroyWindow =
+        isLastBook &&
+        !!appService?.hasWindow &&
+        (openWithFiles.length > 0 || getCurrentWindow().label.startsWith('reader'));
+      await closeBook(!willDestroyWindow);
       if (isLastBook) {
-        const openWithFiles = (await parseOpenWithFiles(appService)) || [];
         if (appService?.hasWindow) {
           if (openWithFiles.length > 0) {
             void tauriHandleOnCloseWindow(handleCloseBooks).catch((error) => {
