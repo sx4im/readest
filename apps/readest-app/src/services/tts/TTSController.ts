@@ -589,6 +589,16 @@ export class TTSController extends EventTarget {
     return this.ttsClient === this.ttsMediaOverlayClient;
   }
 
+  // Whether the active engine plays a continuous recording — the book's own
+  // narration — rather than synthesizing speech sentence by sentence. Gated
+  // on the continuousTimeline capability, never on client identity: a
+  // recording has no per-sentence state to pick up headless, so closing the
+  // book stops it instead of detaching it to play on in the background
+  // (#7523).
+  isContinuousRecording(): boolean {
+    return this.ttsClient.getCapabilities().continuousTimeline === true;
+  }
+
   // Per-book opt-in, defaulting on: only an explicit synthetic-voice choice for
   // this book turns narration off.
   set useNarration(value: boolean) {

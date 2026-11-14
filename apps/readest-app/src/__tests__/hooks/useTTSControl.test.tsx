@@ -192,6 +192,7 @@ vi.mock('@/services/tts', () => ({
       getSectionIndex: vi.fn().mockReturnValue(0),
       usesAudioTransport: vi.fn().mockReturnValue(false),
       supportsLyrics: vi.fn().mockReturnValue(false),
+      isContinuousRecording: vi.fn().mockReturnValue(false),
       reapplyCurrentHighlight: vi.fn(),
       drawLoopRange: vi.fn(),
       kind: 'tts',
@@ -1320,6 +1321,7 @@ describe('useTTSControl background session lifecycle', () => {
     shutdown: ReturnType<typeof vi.fn>;
     detachView: ReturnType<typeof vi.fn>;
     attachView: ReturnType<typeof vi.fn>;
+    isContinuousRecording: ReturnType<typeof vi.fn>;
     terminated: boolean;
     state: string;
   };
@@ -1405,6 +1407,17 @@ describe('useTTSControl background session lifecycle', () => {
     expect(mockSessionManager.stopController).toHaveBeenCalledWith('book', controller, 'user');
   });
 
+  it('tts-close-book stops a continuous recording instead of detaching (#7523)', async () => {
+    const controller = await startSession();
+    controller.terminated = false;
+    controller.isContinuousRecording.mockReturnValue(true);
+    await act(async () => {
+      await eventDispatcher.dispatch('tts-close-book', { bookKey: 'book-1' });
+    });
+    expect(mockSessionManager.detach).not.toHaveBeenCalled();
+    expect(mockSessionManager.stopController).toHaveBeenCalledWith('book', controller, 'user');
+  });
+
   it('ignores a stopped event for the controller another reader replaced', async () => {
     const controller = await startSession();
     const listener = mockSessionManager.addEventListener.mock.calls.find(
@@ -1476,6 +1489,7 @@ describe('useTTSControl background session lifecycle', () => {
     redispatchPosition: vi.fn(),
     usesAudioTransport: vi.fn().mockReturnValue(false),
     supportsLyrics: vi.fn().mockReturnValue(true),
+    isContinuousRecording: vi.fn().mockReturnValue(false),
     isBuffering: vi.fn().mockReturnValue(false),
   });
 

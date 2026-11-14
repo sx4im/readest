@@ -1141,12 +1141,15 @@ export const useTTSControl = ({ bookKey, onRequestHidePanel }: UseTTSControlProp
   // Book close (back to library): a live session goes headless instead of
   // dying. Gate on `terminated`, NOT the state value — chapter transitions
   // sit in transit 'stopped' for seconds and closing during one must detach.
+  // Exception: a continuous recording (the book's own narration) stops
+  // instead — it has no sentence state to resume headless, so detaching it
+  // would leave it playing with nothing to follow (#7523).
   const handleTTSCloseBook = async (event: CustomEvent) => {
     const { bookKey: closingKey } = event.detail;
     if (bookKey !== closingKey) return;
     const controller = ttsControllerRef.current;
     if (!controller) return;
-    if (!controller.terminated) {
+    if (!controller.terminated && !controller.isContinuousRecording()) {
       ttsSessionManager.detach(getBookHashFromKey(bookKey));
     } else {
       await handleStop(bookKey);
