@@ -20,7 +20,7 @@ vi.mock('@tauri-apps/plugin-cli', () => ({
   getMatches: () => mockGetMatches(),
 }));
 
-import { parseOpenWithFiles, shouldOpenTransient } from '@/helpers/openWith';
+import { decodeFileUrlPath, parseOpenWithFiles, shouldOpenTransient } from '@/helpers/openWith';
 
 // Helper type matching the AppService subset used in openWith
 interface MockAppService {
@@ -230,6 +230,31 @@ describe('parseOpenWithFiles', () => {
       expect(result).toEqual(['/path/to/my book.epub']);
     });
 
+    // macOS Finder/Calibre percent-encodes `;` (and `#`, `?`) in file URLs,
+    // but decodeURI() leaves those reserved escapes in place, so the app
+    // looked for a literally-named `...%3B.epub` file and opened nothing
+    // (#7553). The decoded path must name the real file on disk.
+    test.each([
+      ['file:///path/to/Anne_Carson%3B.epub', '/path/to/Anne_Carson;.epub'],
+      ['file:///path/to/A%23B.epub', '/path/to/A#B.epub'],
+      ['file:///path/to/Q%3FA.epub', '/path/to/Q?A.epub'],
+      ['file:///path/to/100%25.epub', '/path/to/100%.epub'],
+    ])('decodes percent-encoded reserved characters in file URLs: %s', async (url, expected) => {
+      mockGetCurrent.mockResolvedValue([url]);
+
+      const result = await parseOpenWithFiles(null);
+
+      expect(result).toEqual([expected]);
+    });
+
+    test('keeps a literal percent sign instead of throwing', async () => {
+      mockGetCurrent.mockResolvedValue(['file:///path/to/100%.epub']);
+
+      const result = await parseOpenWithFiles(null);
+
+      expect(result).toEqual(['/path/to/100%.epub']);
+    });
+
     test('returns null when no deep link URLs', async () => {
       mockGetCurrent.mockResolvedValue(null);
 
@@ -320,5 +345,19 @@ describe('shouldOpenTransient', () => {
   test('undefined action always imports into the library', () => {
     expect(shouldOpenTransient(undefined, false)).toBe(false);
     expect(shouldOpenTransient(undefined, true)).toBe(false);
+  });
+});
+
+describe('decodeFileUrlPath', () => {
+  test('decodes percent-encoded reserved characters per path segment', () => {
+    expect(decodeFileUrlPath('/path/to/Anne_Carson%3B.epub')).toBe('/path/to/Anne_Carson;.epub');
+  });
+
+  test('keeps a literal percent sign instead of throwing', () => {
+    expect(decodeFileUrlPath('/path/to/100%.epub')).toBe('/path/to/100%.epub');
+  });
+
+  test('leaves plain paths untouched', () => {
+    expect(decodeFileUrlPath('/path/to/book.epub')).toBe('/path/to/book.epub');
   });
 });

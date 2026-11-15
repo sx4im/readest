@@ -46,6 +46,28 @@ const parseCLIOpenWithFiles = async () => {
   return files;
 };
 
+/**
+ * Decode a `file://` URL path into a filesystem path.
+ *
+ * macOS Finder/Calibre percent-encodes `;` (and `#`, `?`) in file URLs, and
+ * `decodeURI()` leaves those reserved escapes in place, so a book named
+ * `Anne_Carson;.epub` was looked up as the literal `...%3B.epub` and never
+ * opened (#7553). Decode per path segment with `decodeURIComponent`, which
+ * handles reserved characters, and keep a segment verbatim when it holds a
+ * malformed escape (e.g. a literal `%` in the name) instead of throwing.
+ */
+export const decodeFileUrlPath = (path: string): string =>
+  path
+    .split('/')
+    .map((segment) => {
+      try {
+        return decodeURIComponent(segment);
+      } catch {
+        return segment;
+      }
+    })
+    .join('/');
+
 const parseIntentOpenWithFiles = async (appService: AppService | null) => {
   let urls;
   try {
@@ -65,7 +87,7 @@ const parseIntentOpenWithFiles = async (appService: AppService | null) => {
           if (appService?.isIOSApp) {
             return url;
           } else {
-            return decodeURI(url.replace('file://', ''));
+            return decodeFileUrlPath(url.replace('file://', ''));
           }
         } else if (url.startsWith('content://')) {
           return url;
