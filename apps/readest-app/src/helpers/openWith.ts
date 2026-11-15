@@ -13,6 +13,26 @@ interface CliArgument {
   occurrences: number;
 }
 
+/**
+ * Convert a `file://` URL into a filesystem path.
+ *
+ * `decodeURI` does not decode percent-encoded reserved characters, so a
+ * filename ending in `;` arrived from Finder/Calibre as `...%3B.epub` kept
+ * a literal `%3B` and no longer matched the file on disk — the app opened
+ * to the main screen instead of the book (#7553). `decodeURIComponent`
+ * decodes those escapes too, and is a no-op for a literal `;`. A malformed
+ * `%` sequence (a literal `%` in the name) throws either way, so fall back
+ * to the raw path instead of dropping the open.
+ */
+export const fileUrlToPath = (url: string): string => {
+  const raw = url.replace('file://', '');
+  try {
+    return decodeURIComponent(raw);
+  } catch {
+    return raw;
+  }
+};
+
 const parseWindowOpenWithFiles = () => {
   const params = new URLSearchParams(window.location.search);
   const files = params.getAll('file');
@@ -65,7 +85,7 @@ const parseIntentOpenWithFiles = async (appService: AppService | null) => {
           if (appService?.isIOSApp) {
             return url;
           } else {
-            return decodeURI(url.replace('file://', ''));
+            return fileUrlToPath(url);
           }
         } else if (url.startsWith('content://')) {
           return url;

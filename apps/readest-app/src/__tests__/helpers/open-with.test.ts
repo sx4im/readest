@@ -230,6 +230,44 @@ describe('parseOpenWithFiles', () => {
       expect(result).toEqual(['/path/to/my book.epub']);
     });
 
+    // A filename ending in `;` (e.g. `Eros_..._Carson;.epub`) opened from
+    // Finder/Calibre arrives percent-encoded (`%3B`). `decodeURI` leaves
+    // reserved characters encoded, so the path kept a literal `%3B` and no
+    // longer matched the file on disk — the app opened to the main screen
+    // instead of the book (#7553).
+    test.each([
+      [
+        'Eros_the_Bittersweet__An_Essay_-_Anne_Carson%3B.epub',
+        'Eros_the_Bittersweet__An_Essay_-_Anne_Carson;.epub',
+      ],
+      ['A%23B.epub', 'A#B.epub'],
+      ['What%3F.epub', 'What?.epub'],
+    ])('decodes percent-encoded reserved characters in file names (%s)', async (encoded, decoded) => {
+      mockGetCurrent.mockResolvedValue([`file:///path/to/${encoded}`]);
+
+      const result = await parseOpenWithFiles(null);
+
+      expect(result).toEqual([`/path/to/${decoded}`]);
+    });
+
+    test('keeps a literal semicolon in the file name', async () => {
+      mockGetCurrent.mockResolvedValue(['file:///path/to/Carson;.epub']);
+
+      const result = await parseOpenWithFiles(null);
+
+      expect(result).toEqual(['/path/to/Carson;.epub']);
+    });
+
+    test('does not throw on a malformed percent sequence', async () => {
+      // A literal `%` in the name is not a valid escape; the open must still
+      // go through with the raw path instead of dropping the file.
+      mockGetCurrent.mockResolvedValue(['file:///path/to/100%.epub']);
+
+      const result = await parseOpenWithFiles(null);
+
+      expect(result).toEqual(['/path/to/100%.epub']);
+    });
+
     test('returns null when no deep link URLs', async () => {
       mockGetCurrent.mockResolvedValue(null);
 
