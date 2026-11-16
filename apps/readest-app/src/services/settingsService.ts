@@ -166,7 +166,16 @@ export async function loadSettings(ctx: Context): Promise<SystemSettings> {
     ...settings.aiSettings,
   };
 
+  // The books dir lives under this install's app container, so a stored
+  // books dir that no longer matches the current prefix means these
+  // settings were carried into a different container: iOS device migration
+  // copies settings.json verbatim. The old device's sync identity must not
+  // survive the move, or two physical devices share one device id and
+  // conflict detection breaks (#7558). A missing stored dir (legacy files)
+  // is not a move — only a present, different one rotates the ids.
+  const previousBooksDir = settings.localBooksDir;
   settings.localBooksDir = await ctx.fs.getPrefix('Books');
+  const appDataMoved = Boolean(previousBooksDir) && previousBooksDir !== settings.localBooksDir;
 
   // Coerce stale `'wikipedia'` quick-action to `'dictionary'`. The Wikipedia
   // annotation tool was removed; Wikipedia is now reachable as a tab inside
@@ -189,17 +198,17 @@ export async function loadSettings(ctx: Context): Promise<SystemSettings> {
 
   if (settings.bookshelves) settings.bookshelves = mergeBookshelfStates(settings.bookshelves);
 
-  if (!settings.kosync.deviceId) {
+  if (!settings.kosync.deviceId || appDataMoved) {
     settings.kosync.deviceId = uuidv4();
     await saveSettings(ctx.fs, settings);
   }
 
-  if (!settings.bookorbit.deviceId) {
+  if (!settings.bookorbit.deviceId || appDataMoved) {
     settings.bookorbit.deviceId = uuidv4();
     await saveSettings(ctx.fs, settings);
   }
 
-  if (!settings.replicaDeviceId) {
+  if (!settings.replicaDeviceId || appDataMoved) {
     settings.replicaDeviceId = uuidv4();
     await saveSettings(ctx.fs, settings);
   }
