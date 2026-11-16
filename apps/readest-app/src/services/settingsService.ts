@@ -204,6 +204,37 @@ export async function loadSettings(ctx: Context): Promise<SystemSettings> {
     await saveSettings(ctx.fs, settings);
   }
 
+  // iOS device migration (#7558): Apple's device-to-device migration
+  // copies settings.json into a fresh app container on the new iPhone,
+  // so the persisted sync device IDs would be shared by two physical
+  // devices. The app-data container path embeds a per-install UUID that
+  // changes when the app is restored into a new container, so bind the
+  // per-device IDs to it: the first run after this ships adopts the
+  // current container without rotating, and a later container change
+  // means the settings were migrated — mint fresh IDs (the same set the
+  // backup blacklist treats as per-device identity, #4098) and adopt
+  // the new container. Gated to sandboxed app data (iOS/Android):
+  // on desktop and web the container path never moves, and Android
+  // restores keep the same package path, so this is a no-op there.
+  if (ctx.isAppDataSandbox) {
+    const containerId = await ctx.fs.getPrefix('Data');
+    const migrated = !!settings.deviceContainerId && settings.deviceContainerId !== containerId;
+    if (migrated) {
+      settings.kosync.deviceId = uuidv4();
+      settings.bookorbit.deviceId = uuidv4();
+      settings.replicaDeviceId = uuidv4();
+      if (settings.googleDrive?.deviceId) settings.googleDrive.deviceId = uuidv4();
+      if (settings.webdav?.deviceId) settings.webdav.deviceId = uuidv4();
+      if (settings.s3?.deviceId) settings.s3.deviceId = uuidv4();
+      if (settings.onedrive?.deviceId) settings.onedrive.deviceId = uuidv4();
+      if (settings.icloud?.deviceId) settings.icloud.deviceId = uuidv4();
+    }
+    if (migrated || !settings.deviceContainerId) {
+      settings.deviceContainerId = containerId;
+      await saveSettings(ctx.fs, settings);
+    }
+  }
+
   if (migrateBookshelfSettings(settings)) {
     await saveSettings(ctx.fs, settings);
   }

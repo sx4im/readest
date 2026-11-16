@@ -656,6 +656,15 @@ export interface SystemSettings {
    */
   replicaDeviceId?: string;
   /**
+   * App-data container the per-device IDs above are bound to (#7558).
+   * On iOS the container path embeds a per-install UUID that changes
+   * when the app is restored into a new container (device migration),
+   * so a mismatch means settings.json was migrated to another device
+   * and the device IDs must be re-minted. Absent until the first load
+   * adopts the current container.
+   */
+  deviceContainerId?: string;
+  /**
    * Per-kind cursor for replica sync. Stores the HLC string of the last
    * pulled row per kind. Absent kinds pull from the beginning.
    */
